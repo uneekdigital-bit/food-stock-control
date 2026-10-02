@@ -1,7 +1,7 @@
 let deferredInstallPrompt=null;
 
 function installRoleAllowed(){
-  const role=(window.profile?.role||'').toLowerCase();
+  const role=(profile?.role||'').toLowerCase();
   return role==='manager'||role==='qa_manager';
 }
 
