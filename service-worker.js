@@ -1,4 +1,4 @@
-const CACHE_NAME="food-stock-shell-v4-recipe-controls";
+const CACHE_NAME="food-stock-shell-v5-new-product";
 const SHELL=["/","/index.html","/manifest.webmanifest","/icons/icon.svg"];
 self.addEventListener("install",e=>{
   e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(SHELL)).catch(()=>{}));
