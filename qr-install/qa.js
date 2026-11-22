@@ -17,12 +17,42 @@ function qaLabel(id,expiry) {
 }
 function isQa(){return ['qa','qa_manager'].includes(profile?.role);}
 async function refreshQa(){
-  const r=await sb.from('qa_calls').select('id,batch_id,expiry_date,responder,responder_name,batches(batch_no,expiry_date,quantity,products(name))').order('id',{ascending:true});
+  const r=await sb.from('qa_calls').select('id,batch_id,expiry_date,requested_by,responder,responder_name,batches(batch_no,expiry_date,quantity,products(name))').order('id',{ascending:true});
   if(r.error){$('qaStatus').textContent='QA status unavailable. Contact QA directly if needed.';return;}
   qaCalls=new Map(r.data.map(c=>[Number(c.batch_id),c]));
   document.querySelectorAll('[data-qa]').forEach(el=>el.innerHTML=qaLabel(el.dataset.qa,el.dataset.expiry));
   $('qaQueue').innerHTML=isQa()?r.data.filter(c=>!c.responder && c.batches?.quantity>0 && c.expiry_date===c.batches.expiry_date && expiredBatch(c.batches)).map(c=>
     '<p>'+esc(c.batches.products.name)+' · '+esc(c.batches.batch_no)+' '+qaControl({...c.batches,id:c.batch_id})+'</p>').join(''):'';
+  showPickerAcknowledgement(r.data);
+
+}
+const dismissedQaNotices = new Set();
+function showPickerAcknowledgement(calls) {
+  if (profile?.role !== 'picker' || document.hidden || document.getElementById('qaOnWay')) return;
+  for (const call of calls) {
+    if (!call.responder || call.requested_by !== profile.user_id) continue;
+    const key = 'food-qa-seen:' + profile.user_id + ':' + call.id;
+    if (dismissedQaNotices.has(key)) continue;
+    try { if (localStorage.getItem(key)) continue; } catch {}
+    const dialog = document.createElement('dialog');
+    dialog.id = 'qaOnWay';
+    dialog.setAttribute('aria-labelledby','qaOnWayTitle');
+    dialog.innerHTML = '<h2 id="qaOnWayTitle">QA on the way</h2><p></p><button class="primary" autofocus>OK</button>';
+    const batch = call.batches;
+    dialog.querySelector('p').textContent = (call.responder_name || 'QA') + ' is on the way for ' +
+      [batch?.products?.name, batch?.batch_no].filter(Boolean).join(' · ') + '.';
+    dialog.addEventListener('cancel', event => event.preventDefault());
+    dialog.querySelector('button').onclick = () => {
+      dismissedQaNotices.add(key);
+      try { localStorage.setItem(key,'1'); } catch {}
+      dialog.close();
+      dialog.remove();
+      showPickerAcknowledgement(calls);
+    };
+    document.body.append(dialog);
+    dialog.showModal();
+    return;
+  }
 }
 async function qaApi(body){
   const {data:{session}}=await sb.auth.getSession();

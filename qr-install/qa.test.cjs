@@ -37,3 +37,25 @@ test('QA subscriptions accept Apple and Android Chrome push services',()=>{
     assert.equal(endpoint({endpoint:url,keys}),null);
   }
 });
+test('only the requesting picker sees the acknowledgement, and OK clears it across refresh',()=>{
+  const elements=new Map(), storage=new Map();
+  const document={
+    getElementById:id=>elements.get(id),
+    body:{append:d=>elements.set(d.id,d)},
+    createElement:()=>{
+      const p={},button={};
+      return {setAttribute(){},addEventListener(){},showModal(){},close(){},remove(){elements.delete(this.id)},querySelector:s=>s==='p'?p:button};
+    }
+  };
+  const call={id:11,requested_by:'p',responder:'qa',responder_name:'Qas',batches:{batch_no:'LOT-A',products:{name:'Cheddar'}}};
+  const ctx=vm.createContext({profile:{role:'picker',user_id:'p'},document,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},call});
+  vm.runInContext(src,ctx);
+  const show=()=>vm.runInContext('showPickerAcknowledgement([call])',ctx);
+  ctx.profile.user_id='other';show();assert.equal(elements.size,0);
+  ctx.profile.user_id='p';show();
+  const dialog=elements.get('qaOnWay');
+  assert.match(dialog.querySelector('p').textContent,/Qas.*Cheddar.*LOT-A/);
+  show();assert.equal(elements.get('qaOnWay'),dialog);
+  dialog.querySelector('button').onclick();
+  vm.runInContext('dismissedQaNotices.clear()',ctx);show();assert.equal(elements.size,0);
+});
