@@ -49,7 +49,7 @@ function scannedExpired(batch,name){
 }
 async function toggleQaDuty(){
   try{
-    if(!qaWorker)throw Error('Open Food Stock Control from the iPhone Home Screen to enable QA alerts.');
+    if(!qaWorker)throw Error('Open Food Stock Control from the iPhone Home Screen or in Chrome on Android to enable QA alerts.');
     let sub=activeSubscription;
     if($('qaDuty').dataset.on==='yes' && sub){
       await qaApi({action:'off',subscription:sub.toJSON()});

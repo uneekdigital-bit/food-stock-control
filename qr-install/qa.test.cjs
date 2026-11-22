@@ -27,3 +27,13 @@ test('installed build scripts parse and both scan entries stop before picking',(
   assert.match(html,/if\(expiredBatch\(batch\)\)return scannedExpired/);
   assert.match(html,/qaControl\(x.b\)/);
 });
+test('QA subscriptions accept Apple and Android Chrome push services',()=>{
+  const endpoint=require('./lib/push-endpoint');
+  const keys={auth:'test',p256dh:'test'};
+  for(const url of ['https://web.push.apple.com/token','https://fcm.googleapis.com/fcm/send/token','https://fcm.googleapis.com/wp/token']){
+    assert.equal(endpoint({endpoint:url,keys}),url);
+  }
+  for(const url of ['http://fcm.googleapis.com/wp/token','https://fcm.googleapis.com.example.org/wp/token','https://fcm.googleapis.com/unrelated','invalid']){
+    assert.equal(endpoint({endpoint:url,keys}),null);
+  }
+});

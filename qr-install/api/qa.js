@@ -1,4 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
+const pushEndpoint = require('../lib/push-endpoint');
 const push = require('web-push');
 
 module.exports = async function qa(req,res) {
@@ -23,10 +24,9 @@ module.exports = async function qa(req,res) {
     }
     if (action === 'on') {
       if (!['qa','qa_manager'].includes(profile.role)) return res.status(403).end();
-      const endpoint = new URL(subscription.endpoint);
-      if (endpoint.protocol !== 'https:' || endpoint.hostname !== 'web.push.apple.com' && !endpoint.hostname.endsWith('.push.apple.com') || endpoint.port || endpoint.username || endpoint.password || !subscription.keys?.auth || !subscription.keys?.p256dh)
-        return res.status(400).json({error:'An iPhone push subscription is required'});
-      const result = await admin.from('qa_push_devices').upsert({owner_id:user.id,endpoint:endpoint.href,subscription});
+      const endpoint = pushEndpoint(subscription);
+      if (!endpoint) return res.status(400).json({error:'Use the installed iPhone app or Chrome on Android for QA alerts.'});
+      const result = await admin.from('qa_push_devices').upsert({owner_id:user.id,endpoint,subscription:{endpoint,keys:subscription.keys}});
       if(result.error) throw result.error;
       return res.json({ok:true});
     }
