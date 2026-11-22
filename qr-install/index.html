@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Food Stock Control</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f6f8;color:#17212b}header{background:#194d33;color:#fff;padding:16px;position:sticky;top:0;z-index:5}main{max-width:1000px;margin:auto;padding:12px}.card{background:#fff;border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 1px 7px #0002}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}input,select,button{font-size:16px;padding:11px;border:1px solid #bbb;border-radius:9px}input,select{width:100%}button{cursor:pointer;font-weight:700}.primary{background:#194d33;color:#fff;border:0}.warn{background:#ffe2a8}.danger{background:#f4caca}.good{background:#d9f0df}.muted{color:#667}.big{font-size:34px;font-weight:800}.tabs button{font-size:14px}.hide{display:none}.pill{display:inline-block;padding:5px 9px;border-radius:18px;background:#edf1f4}.manager{background:#dce9ff}.picker{background:#e8f7e8}.full{width:100%}.small{font-size:13px}.batch{border-top:1px solid #ddd;padding-top:10px;margin-top:10px}.qrbtn{background:#eef4ff}.rolebox{border:2px solid #194d33}.expired{background:#ffd4d4}.soon{background:#fff0c7}.pickedItem{background:#eceff1!important;opacity:.72}.pickedItem .pickedText{text-decoration:line-through;text-decoration-color:#c62828;text-decoration-thickness:3px}.pickedDoneBtn{background:#b0b7bd;color:#fff;border:0;cursor:default}.scanOverlay{position:fixed;inset:0;background:#0009;display:flex;align-items:center;justify-content:center;z-index:60;padding:14px}.scanOverlay.hide{display:none!important}.scanDialog{background:#fff;border-radius:14px;padding:16px;max-width:500px;width:100%}.scanVideo{width:100%;max-height:55vh;background:#111;border-radius:10px}.qrLabelRow{border-top:1px solid #ddd;padding:12px 0}.qrLabelRow input[type=checkbox]{width:auto;transform:scale(1.25)}.toolbarSticky{position:sticky;top:62px;background:#fff;z-index:4;padding:10px;border-radius:12px;box-shadow:0 1px 6px #0002}
+</style>
+<link rel="manifest" href="/manifest.webmanifest"></head>
+<body>
+<header><b>FOOD SUPPLY — QR STOCK CONTROL</b> <span id="who" class="small"></span></header>
+<main>
+<div id="auth" class="card">
+  <h2>Sign in</h2>
+  <div class="grid"><div><label>Staff username</label><input id="username" type="text" autocomplete="username" placeholder="e.g. john"></div><div><label>Password</label><input id="password" type="password" autocomplete="current-password"></div></div>
+  <div class="row" style="margin-top:10px"><button id="signin" class="primary">SIGN IN</button></div>
+  <p id="authmsg" class="muted"></p><p class="small muted">Manager username: <b>uneekdigital</b>. Staff accounts use their assigned username.</p>
+</div>
+
+<div id="app" class="hide"><button id="qaDuty" hidden onclick="toggleQaDuty()">Enable QA alerts</button><div id="qaStatus" role="status"></div><div id="qaQueue"></div>
+  <div class="card rolebox">
+    <div class="row"><div><b>Access:</b> <span id="rolepill" class="pill"></span></div><div class="muted" id="displayname"></div></div>
+    <div id="managerClaim" class="hide" style="margin-top:10px"><p class="small">First manager only: enter the setup code to unlock Stock In / administration.</p><div class="row"><input id="managerCode" placeholder="Manager setup code" style="max-width:300px"><button id="claimManager" class="primary">UNLOCK MANAGER</button></div></div>
+  </div>
+
+  <div class="card tabs row">
+    <button id="stockBtn">STOCK / PICK</button>
+    <button id="expiryBtn">EXPIRY</button>
+    <button id="historyBtn">MY HISTORY</button>
+    <button id="recipesBtn">RECIPES</button>
+    <button id="pickListsBtn">PICK LIST</button>
+    <button id="receiveBtn" class="mgr hide">STOCK IN</button>
+    <button id="qrLabelsBtn" class="mgr hide">QR LABELS</button>
+    <button id="usersBtn" class="mgr hide">USERS</button>
+    <button id="logout">SIGN OUT</button>
+  </div>
+  <div class="card"><input id="search" placeholder="Scan QR / product code / product name"><button id="searchBtn" class="primary" style="margin-top:8px">SEARCH</button></div>
+  <div id="content"></div>
+</div>
+</main>
+<div id="itemScanOverlay" class="scanOverlay hide">
+  <div class="scanDialog">
+    <h2>Scan Batch QR</h2>
+    <p id="itemScanTitle" class="muted"></p>
+    <video id="itemScanVideo" class="scanVideo" playsinline></video>
+    <div class="row" style="margin-top:10px">
+      <button id="itemScanCancel" style="flex:1">CANCEL</button>
+    </div>
+    <p id="itemScanMsg" class="small muted">Point the camera at the batch QR label.</p>
+  </div>
+</div>
+<script>
+const SUPABASE_URL='https://askahxgdymruqfoaneht.supabase.co';
+const SUPABASE_KEY='sb_publishable_qiRZh800xG7zETSRgHyyCg_ol7SkaN1';
+const sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=id=>document.getElementById(id), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let profile=null, realtime=null;
+function daysUntil(d){return Math.ceil((new Date(d+'T00:00:00')-new Date())/86400000)}
+function loginEmailFromUsername(v){
+  const u=(v||'').trim().toLowerCase();
+  if(u==='uneekdigital') return 'uneekdigital@gmail.com';
+  return u.includes('@')?u:(u+'@staff.foodstock.app');
+}
+async function signIn(){const username=$('username').value.trim();if(!username)return $('authmsg').textContent='Enter your staff username.';const {error}=await sb.auth.signInWithPassword({email:loginEmailFromUsername(username),password:$('password').value});$('authmsg').textContent=error?'Username or password not recognised.':'';if(!error)boot()}
+async function loadProfile(){
+  const {data:{user},error:userError}=await sb.auth.getUser();
+  if(userError||!user) throw userError||new Error('No signed-in user');
+  const {data,error}=await sb.from('profiles').select('*').eq('user_id',user.id).single();
+  if(error)throw error;
+  profile=data;
+  const {data:liveRole,error:roleError}=await sb.rpc('current_user_role');
+  if(!roleError && liveRole) profile.role=liveRole;
+  renderRole();
+}
+function renderRole(){
+  const role=profile?.role||'picker';
+  $('rolepill').textContent=role.toUpperCase();
+  $('rolepill').className='pill '+role;
+  $('displayname').textContent=profile?.display_name||'';
+  $('who').textContent=profile?` — ${profile.display_name} (${role})`:'';
+  document.querySelectorAll('.mgr').forEach(x=>x.classList.toggle('hide',role!=='manager'));
+  $('managerClaim').classList.add('hide');
+}
+async function claimManager(){const code=$('managerCode').value.trim();const {data,error}=await sb.rpc('claim_manager_role',{p_code:code});if(error)return alert(error.message);if(!data)return alert('Manager code was not accepted.');await loadProfile();alert('Manager access enabled.');showStock()}
+async function boot(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return;
+  $('auth').classList.add('hide');
+  $('app').classList.remove('hide');
+  await loadProfile();
+  await startQa();
+  const qs=new URLSearchParams(location.search);
+  const batchId=qs.get('batch');
+  const code=qs.get('code');
+  if(qs.has('qaBatch')){
+    const r=await sb.from('batches').select('*,products(name)').eq('id',qs.get('qaBatch')).single();
+    if(r.data && expiredBatch(r.data)) scannedExpired(r.data,r.data.products.name); else await showStock();
+  }else if(batchId){
+    await handleBatchQrPick(parseInt(batchId));
+  }else{
+    if(code)$('search').value=code;
+    await showStock();
+  }
+  startRealtime();
+}
+function startRealtime(){if(realtime)sb.removeChannel(realtime);realtime=sb.channel('food-stock-live').on('postgres_changes',{event:'*',schema:'public',table:'batches'},()=>{}).on('postgres_changes',{event:'*',schema:'public',table:'pick_lists'},()=>{}).on('postgres_changes',{event:'*',schema:'public',table:'pick_list_items'},()=>{}).on('postgres_changes',{event:'*',schema:'public',table:'stock_transactions'},()=>{}).subscribe()}
+async function getProducts(){let q=sb.from('products').select('*,batches(*)').eq('active',true).order('scan_code');const t=$('search').value.trim();if(t)q=q.or(`scan_code.ilike.%${t}%,name.ilike.%${t}%,category.ilike.%${t}%`);const {data,error}=await q;if(error)throw error;return data||[]}
+async function showStock(){const data=await getProducts();$('content').innerHTML=data.length?data.map(productCard).join(''):'<div class="card">No products found.</div>';document.querySelectorAll('.pickbtn').forEach(b=>b.onclick=()=>pick(b.dataset.code))}
+function productCard(p){const batches=(p.batches||[]).sort((a,b)=>a.expiry_date.localeCompare(b.expiry_date));const total=batches.reduce((s,b)=>s+b.quantity,0);const available=batches.filter(b=>b.quantity>0&&daysUntil(b.expiry_date)>=0);const next=available[0];const low=total<=p.reorder_level;return `<div class="card"><div class="row"><b>${esc(p.scan_code)}</b><span class="pill ${low?'warn':'good'}">${low?'LOW STOCK':'STOCK OK'}</span></div><h2>${esc(p.name)}</h2><div class="muted">${esc(p.category||'')} · ${esc(p.location||'')}</div><p>Total stock</p><div class="big">${total}</div>${next?`<p><b>FEFO next:</b> ${esc(next.batch_no)} — expires ${esc(next.expiry_date)} — ${next.quantity} ${esc(p.unit)}</p>`:'<p class="danger">No unexpired stock available</p>'}<div class="row">${profile?.role==='manager'?`<input id="pick_${esc(p.scan_code)}" type="number" min="1" value="1" style="max-width:100px"><button class="pickbtn primary" data-code="${esc(p.scan_code)}">MANAGER STOCK OUT</button>`:'<span class="pill">Use batch QR for recipe picking</span>'}</div>${batches.map(b=>batchLine(b,p)).join('')}</div>`}
+function batchLine(b,p){
+  const d=daysUntil(b.expiry_date), cls=d<0?'expired':d<=7?'soon':'';
+  return `<div class="batch ${cls}"><b>${esc(b.batch_no)}</b> · Received ${esc(b.received_date||'')} · Exp ${esc(b.expiry_date)} · Qty ${b.quantity} · ${esc(b.supplier||'')}
+  ${qaControl(b)} ${profile?.role==='manager'&&b.quantity>0?` <button onclick="printBatchLabel(${b.id},'${esc(p.scan_code)}','${esc(p.name)}','${esc(b.batch_no)}','${esc(b.expiry_date)}')">PRINT BATCH QR</button> <button onclick="writeOff(${b.id},'${esc(p.name)}')">WRITE OFF</button>`:''}</div>`
+}
+async function pick(code){const n=Math.max(1,parseInt($('pick_'+code).value||'1'));const {error}=await sb.rpc('pick_stock',{p_scan_code:code,p_quantity:n,p_note:'Picked via QR stock app'});if(error)return alert(error.message);await showStock()}
+async function showExpiry(){const data=await getProducts();const rows=[];for(const p of data)for(const b of p.batches||[])rows.push({p,b,d:daysUntil(b.expiry_date)});rows.sort((a,b)=>a.b.expiry_date.localeCompare(b.b.expiry_date));$('content').innerHTML='<div class="card"><h2>Expiry Dashboard</h2>'+rows.map(x=>`<p class="${x.d<0?'expired':x.d<=7?'soon':''}"><b>${esc(x.p.name)}</b> — ${esc(x.b.batch_no)} — ${esc(x.b.expiry_date)} — Qty ${x.b.quantity} — ${x.d<0?'EXPIRED':x.d+' days'} ${qaControl(x.b)}</p>`).join('')+'</div>'}
+
+async function showRecipes(){
+  const {data,error}=await sb.from('recipes').select('*,recipe_ingredients(*,products(*,batches(*)))').eq('active',true).order('code');
+  if(error)return alert(error.message);
+  $('content').innerHTML=(data||[]).map(recipeCard).join('')||'<div class="card">No recipes found.</div>';
+  document.querySelectorAll('.recipeBatches').forEach(i=>i.oninput=()=>updateRecipeCalc(i.dataset.id));
+  document.querySelectorAll('.createPickListBtn').forEach(b=>b.onclick=()=>createPickList(parseInt(b.dataset.id)));
+  document.querySelectorAll('.printRecipeBtn').forEach(b=>b.onclick=()=>printRecipe(parseInt(b.dataset.id)));
+  (data||[]).forEach(r=>updateRecipeCalc(r.id));
+}
+function recipeCard(r){
+  const lines=(r.recipe_ingredients||[]).sort((a,b)=>a.sort_order-b.sort_order);
+  return `<div class="card">
+    <div class="row">
+      <div>
+        <b>${esc(r.code)}</b>
+        <h2 style="margin:6px 0 0">${esc(r.name)}</h2>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <span class="pill">${r.base_servings} portions / batch</span>
+        
+      </div>
+    </div>
+    <p class="muted">${esc(r.description||'')}</p>
+    <div class="grid">
+      <div><label>Number of batches</label><input class="recipeBatches" data-id="${r.id}" id="recipe_batches_${r.id}" type="number" min="1" value="1"></div>
+      <div><label>Total portions</label><div id="recipe_servings_${r.id}" class="big">${r.base_servings}</div></div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="createPickListBtn primary full" data-id="${r.id}">ADD THIS RECIPE TO PICK LIST</button>
+    </div>
+    <div id="recipe_lines_${r.id}" style="margin-top:12px">${lines.map(x=>recipeIngredientLine(x,1)).join('')}</div>
+    <p id="recipe_msg_${r.id}" class="muted small">${profile?.role==='manager'?'Choose the number of batches, then press ADD THIS RECIPE TO PICK LIST.':'Only a Manager can add recipes to the pick list.'}</p>
+    <button class="printRecipeBtn full" data-id="${r.id}" style="margin-top:10px">PRINT RECIPE</button>
+  </div>`
+}
+function recipeIngredientLine(x,batches){
+  const p=x.products||{};
+  const total=(p.batches||[]).reduce((s,b)=>s+Number(b.quantity||0),0);
+  const need=Number(x.stock_qty_per_batch||0)*batches;
+  const ok=total>=need;
+  const amount=batches===1?x.display_amount:`${batches} × ${x.display_amount}`;
+  return `<div class="batch ${ok?'':'danger'}"><b>${esc(p.name||'Ingredient')}</b><br>${esc(amount)}<br><span class="muted">Stock units needed: ${need} ${esc(p.unit||'')} · Available: ${total}</span> <span class="pill ${ok?'good':'danger'}">${ok?'ENOUGH':'SHORT'}</span></div>`
+}
+async function updateRecipeCalc(id){
+  const batches=Math.max(1,parseInt($('recipe_batches_'+id)?.value||'1'));
+  const {data,error}=await sb.from('recipes').select('base_servings,recipe_ingredients(*,products(*,batches(*)))').eq('id',id).single();
+  if(error)return;
+  $('recipe_servings_'+id).textContent=data.base_servings*batches;
+  $('recipe_lines_'+id).innerHTML=(data.recipe_ingredients||[]).sort((a,b)=>a.sort_order-b.sort_order).map(x=>recipeIngredientLine(x,batches)).join('');
+}
+async function createPickList(id){
+  const {data:liveRole,error:roleError}=await sb.rpc('current_user_role');
+  if(roleError)return alert('Could not verify Manager access: '+roleError.message);
+  if(liveRole!=='manager')return alert('Manager access required.');
+  const batches=Math.max(1,parseInt($('recipe_batches_'+id).value||'1'));
+  const msg=$('recipe_msg_'+id);
+  if(!confirm(`Add this RECIPE to the PICK LIST for ${batches} batch${batches===1?'':'es'}?`))return;
+  msg.textContent='Creating pick list…';
+  const {data,error}=await sb.rpc('create_recipe_pick_list',{p_recipe_id:id,p_batches:batches,p_note:'Created from recipe screen'});
+  if(error){msg.textContent=error.message;return}
+  msg.textContent=`CONFIRMED — Pick list #${data} added. Open PICK LIST to collect the ingredients.`;
+}
+
+async function showPickLists(){
+  const {data,error}=await sb.from('pick_lists')
+    .select('*,recipes(code,name,base_servings),pick_list_items(*,products(name,scan_code,unit,location,batches(id,batch_no,expiry_date,quantity,received_date)))')
+    .neq('status','cancelled')
+    .is('cleared_at',null)
+    .order('created_at',{ascending:true});
+  if(error)return alert(error.message);
+  const lists=data||[];
+  const clearBtn=profile?.role==='manager'?`<div class="card"><button id="clearTodayBtn" class="full">CLEAR COMPLETED TODAY</button><p class="small muted">Only completed pick lists are cleared from this active view. Stock is not deducted again and history is kept.</p></div>`:'';
+  $('content').innerHTML=clearBtn+(lists.length?lists.map(pickListCard).join(''):'<div class="card"><h2>Pick List</h2><p>No active pick lists.</p></div>');
+  if($('clearTodayBtn'))$('clearTodayBtn').onclick=clearCompletedToday;
+  document.querySelectorAll('.pickListItemBtn').forEach(b=>b.onclick=()=>pickListItem(parseInt(b.dataset.id)));
+  document.querySelectorAll('.scanBatchBtn').forEach(b=>b.onclick=()=>startItemBatchScanner(parseInt(b.dataset.id), b.dataset.name||'Ingredient'));
+}
+
+function pickListCard(pl){
+  const items=(pl.pick_list_items||[]).sort((a,b)=>a.sort_order-b.sort_order||a.id-b.id);
+  const done=items.filter(x=>x.status==='picked').length;
+  const total=items.length;
+  const pct=total?Math.round(done*100/total):0;
+  return `<div class="card"><div class="row"><b>PICK LIST #${pl.id}</b><span class="pill ${pl.status==='complete'?'good':'warn'}">${esc(pl.status.toUpperCase().replace('_',' '))}</span></div><h2>${esc(pl.recipes?.name||'Recipe')}</h2><p class="muted">${esc(pl.recipes?.code||'')} · ${pl.batches} batch${pl.batches===1?'':'es'} · ${Number(pl.recipes?.base_servings||0)*pl.batches} portions</p><p><b>Progress:</b> ${done}/${total} items picked (${pct}%)</p>${items.map(pickListItemLine).join('')} ${pl.status==='complete'?'<p class="good" style="padding:10px;border-radius:9px"><b>COMPLETE</b> — all ingredients have been picked and deducted from stock.</p>':''}</div>`;
+}
+function pickListItemLine(item){
+  const p=item.products||{};
+  const batches=(p.batches||[]).filter(b=>Number(b.quantity)>0&&daysUntil(b.expiry_date)>=0).sort((a,b)=>a.expiry_date.localeCompare(b.expiry_date)||String(a.received_date||'').localeCompare(String(b.received_date||'')));
+  const available=batches.reduce((s,b)=>s+Number(b.quantity||0),0);
+  const next=batches[0];
+  const picked=item.status==='picked';
+  return `<div class="batch ${picked?'pickedItem':available<item.required_qty?'danger':''}">
+    <div class="pickedText">
+      <div class="row">
+        <div style="flex:1">
+          <b>${esc(p.name||'Ingredient')}</b><br>
+          <span class="muted">${esc(p.scan_code||'')} · Location: ${esc(p.location||'Not set')}</span>
+        </div>
+        <span class="pill ${picked?'good':''}">${picked?'PICKED':'TO PICK'}</span>
+      </div>
+      <div style="margin-top:8px"><b>Pick ${item.required_qty} ${esc(p.unit||'units')}</b> · Available ${available}</div>
+      ${next?`<div class="small muted">FEFO: take from batch ${esc(next.batch_no)} · expires ${esc(next.expiry_date)} · qty ${next.quantity}</div>`:'<div class="small danger">No unexpired stock available</div>'}
+    </div>
+    ${picked
+      ? `<button class="pickedDoneBtn full" disabled style="margin-top:9px">PICKED ✓</button>
+         <div class="small muted" style="margin-top:6px">Picked ${item.picked_qty} at ${item.picked_at?new Date(item.picked_at).toLocaleString():''}</div>`
+      : profile?.role==='manager'
+        ? `<button class="pickListItemBtn primary full" data-id="${item.id}" style="margin-top:9px" ${available<item.required_qty?'disabled':''}>MANAGER FEFO PICK</button>`
+        : `<button class="scanBatchBtn primary full" data-id="${item.id}" data-name="${esc(p.name||'Ingredient')}" style="margin-top:9px">SCAN BATCH QR</button>
+           <div class="small muted" style="margin-top:6px">Scan the QR label on the physical batch before picking. Wrong/older rotation batches are blocked.</div>`
+    }
+  </div>`;
+}
+async function pickListItem(id){
+  if(!confirm('Confirm this ingredient has been physically picked? Stock will be deducted using FEFO.'))return;
+  const {error}=await sb.rpc('pick_recipe_list_item',{p_item_id:id});
+  if(error)return alert(error.message);
+  await showPickLists();
+}
+
+
+let itemScanStream=null;
+let itemScanTimer=null;
+let itemScanTargetId=null;
+
+async function stopItemBatchScanner(){
+  if(itemScanTimer){clearInterval(itemScanTimer);itemScanTimer=null}
+  if(itemScanStream){
+    itemScanStream.getTracks().forEach(t=>t.stop());
+    itemScanStream=null;
+  }
+  $('itemScanVideo').srcObject=null;
+  $('itemScanOverlay').classList.add('hide');
+}
+
+async function startItemBatchScanner(itemId,name){
+  itemScanTargetId=itemId;
+  $('itemScanTitle').textContent=name+' — scan the batch QR before picking';
+  $('itemScanMsg').textContent='Point the camera at the batch QR label.';
+  $('itemScanOverlay').classList.remove('hide');
+
+  if(!navigator.mediaDevices?.getUserMedia){
+    $('itemScanMsg').textContent='Camera access is not available in this browser.';
+    return;
+  }
+
+  try{
+    itemScanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    const video=$('itemScanVideo');
+    video.srcObject=itemScanStream;
+    await video.play();
+
+    if(!('BarcodeDetector' in window)){
+      $('itemScanMsg').textContent='This browser does not support direct QR scanning. Use Chrome/Android or Safari on a supported iPhone.';
+      return;
+    }
+
+    const detector=new BarcodeDetector({formats:['qr_code']});
+    itemScanTimer=setInterval(async()=>{
+      try{
+        const codes=await detector.detect(video);
+        if(!codes?.length)return;
+        const raw=codes[0].rawValue||'';
+        let batchId=null;
+        try{
+          const u=new URL(raw);
+          batchId=parseInt(u.searchParams.get('batch')||'');
+        }catch{
+          const m=raw.match(/[?&]batch=(\d+)/);
+          if(m)batchId=parseInt(m[1]);
+          else if(/^\d+$/.test(raw.trim()))batchId=parseInt(raw.trim());
+        }
+        if(!batchId)return;
+
+        clearInterval(itemScanTimer); itemScanTimer=null;
+        $('itemScanMsg').textContent='QR detected. Checking FIFO/FEFO rotation…';
+        await validateScannedBatchForItem(itemScanTargetId,batchId);
+      }catch(e){}
+    },500);
+  }catch(e){
+    $('itemScanMsg').textContent='Camera permission was not granted. Allow camera access and try again.';
+  }
+}
+
+async function validateScannedBatchForItem(itemId,batchId){
+  const {data:item,error:itemError}=await sb.from('pick_list_items')
+    .select('id,product_id,required_qty,picked_qty,status,products(name,unit)')
+    .eq('id',itemId).single();
+  if(itemError||!item){
+    await stopItemBatchScanner();
+    return alert('Pick-list item not found.');
+  }
+
+  const {data:batch,error:batchError}=await sb.from('batches')
+    .select('id,product_id,batch_no,received_date,expiry_date,quantity,products(name)')
+    .eq('id',batchId).single();
+
+  if(batchError||!batch){
+    await stopItemBatchScanner();
+    return alert('Batch QR not recognised.');
+  }
+
+  if(expiredBatch(batch)){await stopItemBatchScanner();return scannedExpired(batch, batch.product_name || (batch.product_id===item.product_id?item.products?.name:batch.products?.name));}
+  if(Number(batch.product_id)!==Number(item.product_id)){
+    $('itemScanMsg').textContent='WRONG PRODUCT — scan the correct ingredient batch QR.';
+    if(itemScanTimer)clearInterval(itemScanTimer);
+    itemScanTimer=setInterval(async()=>{
+      try{
+        const detector=new BarcodeDetector({formats:['qr_code']});
+        const codes=await detector.detect($('itemScanVideo'));
+        if(!codes?.length)return;
+        const u=new URL(codes[0].rawValue);
+        const newBatch=parseInt(u.searchParams.get('batch')||'');
+        if(newBatch && newBatch!==batchId){
+          clearInterval(itemScanTimer);itemScanTimer=null;
+          await validateScannedBatchForItem(itemId,newBatch);
+        }
+      }catch(e){}
+    },500);
+    return;
+  }
+
+  const remaining=Math.max(0,Number(item.required_qty)-Number(item.picked_qty||0));
+  if(!confirm(`${item.products?.name||'Ingredient'}\n\nBatch: ${batch.batch_no}\nReceived: ${batch.received_date}\nExpiry: ${batch.expiry_date}\nQuantity required now: ${remaining} ${item.products?.unit||'units'}\n\nPress OK to PICK / CONFIRM this scanned batch.`)){
+    await stopItemBatchScanner();
+    return;
+  }
+
+  const {data:result,error}=await sb.rpc('pick_recipe_list_item_by_batch',{p_item_id:itemId,p_batch_id:batchId});
+  await stopItemBatchScanner();
+
+  if(error){
+    await showPickLists();
+    return alert(error.message);
+  }
+
+  await showPickLists();
+  if(Number(result?.remaining||0)>0){
+    alert(`Picked ${result.picked_now} from ${result.batch_no}.\n${result.remaining} still required.\nScan the next FIFO/FEFO batch QR.`);
+  }else{
+    alert('PICKED ✓');
+  }
+}
+
+async function handleBatchQrPick(batchId){
+  const {data:batch,error:batchError}=await sb.from('batches').select('id,product_id,batch_no,expiry_date,received_date,quantity,products(name,scan_code,unit,location)').eq('id',batchId).single();
+  if(batchError||!batch)return alert('Batch QR not recognised.');
+  if(expiredBatch(batch))return scannedExpired(batch,batch.products?.name);
+
+  const {data:items,error:itemError}=await sb.from('pick_list_items')
+    .select('id,pick_list_id,required_qty,picked_qty,status,pick_lists!inner(id,status,created_at,cleared_at,recipes(name,code))')
+    .eq('product_id',batch.product_id)
+    .neq('status','picked')
+    .is('pick_lists.cleared_at',null)
+    .in('pick_lists.status',['open','in_progress'])
+    .order('pick_list_id',{ascending:true})
+    .limit(1);
+
+  if(itemError)return alert('Could not check the active pick list: '+itemError.message);
+  const item=(items||[])[0];
+  if(!item){
+    history.replaceState({},'',location.pathname);
+    await showPickLists();
+    return alert('This product is not required on an active pick list.');
+  }
+
+  const p=batch.products||{};
+  const list=item.pick_lists||{};
+  const remaining=Math.max(0,Number(item.required_qty)-Number(item.picked_qty||0));
+  if(!confirm(`RECIPE PICK\\n\\n${list.recipes?.name||'Recipe'}\\n${p.name||p.scan_code}\\nBatch: ${batch.batch_no}\\nReceived: ${batch.received_date}\\nExpiry: ${batch.expiry_date}\\nRemaining to pick: ${remaining} ${p.unit||'units'}\\n\\nPress OK only after taking stock from THIS scanned batch.`)){
+    history.replaceState({},'',location.pathname);
+    await showPickLists();
+    return;
+  }
+
+  const {data:result,error}=await sb.rpc('pick_recipe_list_item_by_batch',{p_item_id:item.id,p_batch_id:batchId});
+  history.replaceState({},'',location.pathname);
+  if(error){
+    await showPickLists();
+    return alert(error.message);
+  }
+
+  await showPickLists();
+  if(Number(result?.remaining||0)>0){
+    alert(`Picked ${result.picked_now} from batch ${result.batch_no}.\\n${result.remaining} still required. Scan the NEXT FEFO/FIFO batch QR.`);
+  }else{
+    alert(`PICKED ✓\\n${p.name||p.scan_code} is complete.`);
+  }
+}
+
+async function clearCompletedToday(){
+  if(!confirm('Clear all COMPLETED pick lists for today from the active Pick List screen?\\n\\nStock will NOT be deducted again. History is kept.'))return;
+  const {data,error}=await sb.rpc('clear_completed_today');
+  if(error)return alert(error.message);
+  alert(`${data||0} completed pick list${Number(data)===1?'':'s'} cleared from today’s active view.`);
+  await showPickLists();
+}
+
+async function printRecipe(id){
+  const batches=Math.max(1,parseInt($('recipe_batches_'+id)?.value||'1'));
+  const {data:r,error}=await sb.from('recipes').select('code,name,description,base_servings,recipe_ingredients(display_amount,stock_qty_per_batch,sort_order,products(name,unit))').eq('id',id).single();
+  if(error)return alert(error.message);
+  const lines=(r.recipe_ingredients||[]).sort((a,b)=>a.sort_order-b.sort_order);
+  const w=window.open('','_blank','width=800,height=900');
+  if(!w)return alert('Allow pop-ups to print the recipe.');
+  w.document.write(`<html><head><title>${esc(r.name)}</title><style>body{font-family:Arial;padding:30px;color:#111}h1{margin-bottom:4px}.muted{color:#666}.line{padding:10px 0;border-bottom:1px solid #ccc}.qty{font-weight:bold}@media print{button{display:none}}</style></head><body>
+    <button onclick="print()">PRINT</button>
+    <h1>${esc(r.name)}</h1>
+    <div class="muted">${esc(r.code||'')} · ${batches} batch${batches===1?'':'es'} · ${Number(r.base_servings||0)*batches} portions · ${new Date().toLocaleDateString()}</div>
+    <p>${esc(r.description||'')}</p>
+    <h2>Ingredients</h2>
+    ${lines.map(x=>`<div class="line"><b>${esc(x.products?.name||'Ingredient')}</b><br><span class="qty">${batches===1?esc(x.display_amount):esc(batches+' × '+x.display_amount)}</span><br><span class="muted">Stock units: ${Number(x.stock_qty_per_batch||0)*batches} ${esc(x.products?.unit||'')}</span></div>`).join('')}
+    </body></html>`);
+  w.document.close();
+}
+
+async function printBatchLabel(batchId,code,name,batchNo,expiry){
+  if(profile?.role!=='manager')return alert('Manager access required.');
+  const url=location.origin+location.pathname+'?batch='+encodeURIComponent(batchId);
+  const holder=document.createElement('div');
+  holder.style.position='fixed';holder.style.left='-9999px';document.body.appendChild(holder);
+  new QRCode(holder,{text:url,width:450,height:450});
+  await new Promise(r=>setTimeout(r,80));
+  const canvas=holder.querySelector('canvas');
+  const qr=canvas.toDataURL('image/png');holder.remove();
+  const w=window.open('','_blank','width=650,height=850');
+  if(!w)return alert('Allow pop-ups to print batch QR labels.');
+  w.document.write(`<html><head><title>${esc(code)} ${esc(batchNo)}</title><style>body{font-family:Arial;text-align:center;padding:24px}.code{font-size:34px;font-weight:800}.name{font-size:24px;font-weight:700}.batch{font-size:28px;font-weight:800}.note{font-size:18px}@media print{button{display:none}}</style></head><body>
+    <button onclick="print()">PRINT</button><br>
+    <img src="${qr}" style="width:360px">
+    <div class="code">${esc(code)}</div>
+    <div class="name">${esc(name)}</div>
+    <div class="batch">BATCH: ${esc(batchNo)}</div>
+    <div class="note">Expiry: ${esc(expiry)}</div>
+    <div class="note"><b>SCAN THIS QR BEFORE PICKING</b><br>FIFO / FEFO rotation is checked by the system.</div>
+    </body></html>`);
+  w.document.close();
+}
+
+async function showHistory(){let q=sb.from('stock_transactions').select('*,products(name,scan_code),batches(batch_no,expiry_date)').order('created_at',{ascending:false}).limit(100);const {data,error}=await q;if(error)return alert(error.message);$('content').innerHTML='<div class="card"><h2>'+ (profile.role==='manager'?'Stock History':'My Stock History') +'</h2>'+((data||[]).map(t=>`<p><b>${esc(t.action)}</b> ${t.quantity} — ${esc(t.products?.name||'')} (${esc(t.products?.scan_code||'')})<br><span class="muted">Batch ${esc(t.batches?.batch_no||'')} · ${new Date(t.created_at).toLocaleString()} · ${esc(t.note||'')}</span></p>`).join('')||'No history yet.')+'</div>'}
+async function showReceive(){if(profile.role!=='manager')return;const products=await getProducts();$('content').innerHTML=`<div class="card"><h2>Stock In</h2><label>Product</label><select id="rProduct">${products.map(p=>`<option value="${esc(p.scan_code)}">${esc(p.scan_code)} — ${esc(p.name)}</option>`).join('')}</select><div class="grid"><div><label>Batch / Lot</label><input id="rBatch"></div><div><label>Expiry date</label><input id="rExpiry" type="date"></div><div><label>Quantity</label><input id="rQty" type="number" min="1" value="1"></div><div><label>Supplier</label><input id="rSupplier"></div></div><button id="receiveSave" class="primary" style="margin-top:10px">RECEIVE STOCK</button></div>`;$('receiveSave').onclick=receiveStock}
+async function receiveStock(){const {error}=await sb.rpc('receive_stock',{p_scan_code:$('rProduct').value,p_batch_no:$('rBatch').value.trim(),p_expiry_date:$('rExpiry').value,p_quantity:parseInt($('rQty').value||'1'),p_supplier:$('rSupplier').value.trim()||null,p_note:'Stock received via manager screen'});if(error)return alert(error.message);alert('Stock received.');showReceive()}
+async function writeOff(batchId,name){if(profile.role!=='manager')return;const n=parseInt(prompt(`Write off quantity for ${name}:`,'1')||'0');if(!n)return;const note=prompt('Reason (expired/damaged/etc):','Expired or damaged')||'';const {error}=await sb.rpc('write_off_stock',{p_batch_id:batchId,p_quantity:n,p_note:note});if(error)return alert(error.message);showStock()}
+
+let qrLabelRowsCache=[];
+
+async function showQrLabels(){
+  if(profile?.role!=='manager')return alert('Manager access required.');
+
+  const {data,error}=await sb
+    .from('products')
+    .select('id,scan_code,name,category,location,active,container_type,quantity_per_container,container_measure,batches(id,batch_no,received_date,expiry_date,quantity,supplier)')
+    .eq('active',true)
+    .order('scan_code');
+
+  if(error)return alert(error.message);
+
+  const rows=[];
+  for(const p of (data||[])){
+    for(const b of (p.batches||[])){
+      if(Number(b.quantity)>0){
+        rows.push({
+          batch_id:b.id,
+          product_id:p.id,
+          scan_code:p.scan_code,
+          name:p.name,
+          category:p.category||'',
+          location:p.location||'',
+          container_type:p.container_type||p.unit||'',
+          quantity_per_container:p.quantity_per_container,
+          container_measure:p.container_measure||'',
+          batch_no:b.batch_no,
+          received_date:b.received_date||'',
+          expiry_date:b.expiry_date||'',
+          quantity:Number(b.quantity||0),
+          supplier:b.supplier||''
+        });
+      }
+    }
+  }
+
+  rows.sort((a,b)=>
+    String(a.name).localeCompare(String(b.name)) ||
+    String(a.received_date).localeCompare(String(b.received_date)) ||
+    Number(a.batch_id)-Number(b.batch_id)
+  );
+  qrLabelRowsCache=rows;
+
+  $('content').innerHTML=`
+    <div class="card">
+      <h2>QR LABELS</h2>
+      <p class="muted">Manager-only batch label area. Each QR identifies one physical stock batch so the Picker can scan it and the system can enforce FIFO / FEFO rotation.</p>
+    </div>
+    <div class="toolbarSticky">
+      <input id="qrLabelSearch" placeholder="Search product, code, batch, supplier or location">
+      <div class="row" style="margin-top:8px">
+        <button id="qrSelectAllBtn">SELECT ALL SHOWN</button>
+        <button id="qrClearSelectionBtn">CLEAR SELECTION</button>
+        <button id="qrPrintSelectedBtn" class="primary">PRINT SELECTED</button>
+        <button id="qrPrintAllBtn" class="primary">PRINT ALL ACTIVE BATCH QR LABELS</button>
+      </div>
+      <p id="qrLabelCount" class="small muted"></p>
+    </div>
+    <div id="qrLabelList"></div>`;
+
+  $('qrLabelSearch').oninput=renderQrLabelRows;
+  $('qrSelectAllBtn').onclick=()=>document.querySelectorAll('.qrBatchCheck').forEach(c=>c.checked=true);
+  $('qrClearSelectionBtn').onclick=()=>document.querySelectorAll('.qrBatchCheck').forEach(c=>c.checked=false);
+  $('qrPrintSelectedBtn').onclick=()=>printSelectedQrLabels(false);
+  $('qrPrintAllBtn').onclick=()=>printSelectedQrLabels(true);
+
+  renderQrLabelRows();
+}
+
+function renderQrLabelRows(){
+  const q=($('qrLabelSearch')?.value||'').trim().toLowerCase();
+  const rows=qrLabelRowsCache.filter(x=>{
+    if(!q)return true;
+    return [x.scan_code,x.name,x.category,x.location,x.batch_no,x.supplier,x.received_date,x.expiry_date,x.container_type,x.quantity_per_container,x.container_measure]
+      .some(v=>String(v||'').toLowerCase().includes(q));
+  });
+
+  $('qrLabelCount').textContent=`${rows.length} active batch label${rows.length===1?'':'s'} shown`;
+
+  $('qrLabelList').innerHTML=rows.length
+    ? rows.map(x=>`
+      <div class="card qrLabelRow">
+        <div class="row">
+          <input class="qrBatchCheck" type="checkbox" value="${x.batch_id}">
+          <div style="flex:1;min-width:220px">
+            <b>${esc(x.name)}</b><br>
+            <span class="muted">${esc(x.scan_code)} · ${esc(x.category)} · ${esc(x.location)}</span>
+          </div>
+          <button onclick="printQrLabelIds([${x.batch_id}])">PRINT QR</button>
+        </div>
+        <div style="margin-top:8px">
+          <b>Batch:</b> ${esc(x.batch_no)} ·
+          <b>Received:</b> ${esc(x.received_date)} ·
+          <b>Expiry:</b> ${esc(x.expiry_date)} ·
+          <b>Qty:</b> ${x.quantity}
+          ${x.supplier?` · <b>Supplier:</b> ${esc(x.supplier)}`:''}
+        </div>
+        <div class="grid" style="margin-top:10px">
+          <div><label>Container type</label><input id="ct_${x.product_id}_${x.batch_id}" value="${esc(x.container_type||'')}" placeholder="box / pack / bottle / carton"></div>
+          <div><label>Quantity per container</label><input id="cq_${x.product_id}_${x.batch_id}" type="number" step="0.01" min="0" value="${x.quantity_per_container??''}" placeholder="e.g. 12 or 2"></div>
+          <div><label>Measure</label><input id="cm_${x.product_id}_${x.batch_id}" value="${esc(x.container_measure||'')}" placeholder="each / litre / kg / g"></div>
+        </div>
+        <button style="margin-top:8px" onclick="savePackagingInfo(${x.product_id},${x.batch_id})">SAVE PACK / CONTAINER INFO</button>
+      </div>`).join('')
+    : '<div class="card">No active stock batches match your search.</div>';
+}
+
+
+async function savePackagingInfo(productId,batchId){
+  if(profile?.role!=='manager')return alert('Manager access required.');
+  const ct=$('ct_'+productId+'_'+batchId)?.value.trim()||null;
+  const qRaw=$('cq_'+productId+'_'+batchId)?.value;
+  const cq=qRaw===''?null:Number(qRaw);
+  const cm=$('cm_'+productId+'_'+batchId)?.value.trim()||null;
+  const {error}=await sb.from('products').update({
+    container_type:ct,
+    quantity_per_container:Number.isFinite(cq)?cq:null,
+    container_measure:cm
+  }).eq('id',productId);
+  if(error)return alert(error.message);
+  alert('Pack / container information saved.');
+  await showQrLabels();
+}
+
+async function makeQrDataUrl(text){
+  const holder=document.createElement('div');
+  holder.style.position='fixed';
+  holder.style.left='-9999px';
+  holder.style.top='-9999px';
+  document.body.appendChild(holder);
+  new QRCode(holder,{text,width:420,height:420,correctLevel:QRCode.CorrectLevel.M});
+  await new Promise(r=>setTimeout(r,70));
+  const canvas=holder.querySelector('canvas');
+  const img=holder.querySelector('img');
+  const dataUrl=canvas?canvas.toDataURL('image/png'):(img?img.src:'');
+  holder.remove();
+  return dataUrl;
+}
+
+async function printSelectedQrLabels(printAll){
+  let ids;
+  if(printAll){
+    ids=qrLabelRowsCache.map(x=>x.batch_id);
+  }else{
+    ids=[...document.querySelectorAll('.qrBatchCheck:checked')].map(x=>parseInt(x.value));
+  }
+  if(!ids.length)return alert('Select at least one batch label to print.');
+  await printQrLabelIds(ids);
+}
+
+async function printQrLabelIds(ids){
+  if(profile?.role!=='manager')return alert('Manager access required.');
+
+  const wanted=new Set(ids.map(Number));
+  let rows=qrLabelRowsCache.filter(x=>wanted.has(Number(x.batch_id)));
+
+  if(rows.length!==wanted.size){
+    const {data,error}=await sb
+      .from('products')
+      .select('id,scan_code,name,category,location,container_type,quantity_per_container,container_measure,batches(id,batch_no,received_date,expiry_date,quantity,supplier)')
+      .eq('active',true);
+    if(error)return alert(error.message);
+    rows=[];
+    for(const p of (data||[])){
+      for(const b of (p.batches||[])){
+        if(wanted.has(Number(b.id))){
+          rows.push({
+            batch_id:b.id, scan_code:p.scan_code, name:p.name,
+            category:p.category||'', location:p.location||'',
+            container_type:p.container_type||p.unit||'',
+            quantity_per_container:p.quantity_per_container,
+            container_measure:p.container_measure||'',
+            batch_no:b.batch_no, received_date:b.received_date||'',
+            expiry_date:b.expiry_date||'', quantity:Number(b.quantity||0),
+            supplier:b.supplier||''
+          });
+        }
+      }
+    }
+  }
+
+  if(!rows.length)return alert('No batch labels found.');
+
+  const w=window.open('','_blank','width=1000,height=900');
+  if(!w)return alert('Allow pop-ups to print QR labels.');
+
+  w.document.write(`<html><head><title>QR Labels</title>
+    <style>
+      *{box-sizing:border-box}
+      body{font-family:Arial;margin:0;padding:8px;color:#111;background:#fff}
+      .top{display:flex;justify-content:center;margin-bottom:8px}
+      .labels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+      .label{padding:6px;text-align:center;break-inside:avoid;page-break-inside:avoid}
+      .label img{width:220px;height:220px;display:block;margin:0 auto}
+      .caption{width:220px;margin:8px auto 0 auto;line-height:1.15}
+      .name{font-size:20px;font-weight:800;word-wrap:break-word}
+      .pack{font-size:18px;font-weight:700;margin-top:4px;word-wrap:break-word}
+      @media print{
+        button{display:none}
+        body{padding:4mm}
+        .top{display:none}
+        .labels{gap:4mm}
+        .label{padding:0}
+      }
+    </style></head><body>
+    <div class="top"><button onclick="print()">PRINT QR CODES</button></div>
+    <div id="printLabels" class="labels"></div>
+    </body></html>`);
+  w.document.close();
+
+  const holder=w.document.getElementById('printLabels');
+
+  for(const x of rows){
+    const payloadUrl=new URL(location.origin+location.pathname);
+    payloadUrl.searchParams.set('batch',x.batch_id);
+    payloadUrl.searchParams.set('product',x.scan_code||'');
+    payloadUrl.searchParams.set('name',x.name||'');
+    payloadUrl.searchParams.set('batch_no',x.batch_no||'');
+    payloadUrl.searchParams.set('received',x.received_date||'');
+    payloadUrl.searchParams.set('expiry',x.expiry_date||'');
+    payloadUrl.searchParams.set('container',x.container_type||'');
+    if(x.quantity_per_container!==null && x.quantity_per_container!==undefined) payloadUrl.searchParams.set('container_qty',x.quantity_per_container);
+    payloadUrl.searchParams.set('measure',x.container_measure||'');
+    payloadUrl.searchParams.set('location',x.location||'');
+    payloadUrl.searchParams.set('supplier',x.supplier||'');
+    const qr=await makeQrDataUrl(payloadUrl.toString());
+
+    let packText='';
+    if(x.quantity_per_container!==null && x.quantity_per_container!==undefined && x.quantity_per_container!==''){
+      const qty=String(x.quantity_per_container).replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1');
+      const measure=(x.container_measure||'').trim();
+      const container=(x.container_type||'').trim();
+      packText = [qty, measure, container].filter(Boolean).join(' ');
+    } else {
+      const measure=(x.container_measure||'').trim();
+      const container=(x.container_type||'').trim();
+      packText = [measure, container].filter(Boolean).join(' ');
+    }
+
+    const div=w.document.createElement('div');
+    div.className='label';
+    div.innerHTML=`
+      <img src="${qr}">
+      <div class="caption">
+        <div class="name">${esc(x.name)}</div>
+        ${packText ? `<div class="pack">${esc(packText)}</div>` : ``}
+      </div>`;
+    holder.appendChild(div);
+  }
+}
+
+async function showUsers(){if(profile.role!=='manager')return;const {data,error}=await sb.from('profiles').select('*').order('created_at');if(error)return alert(error.message);$('content').innerHTML=`<div class="card"><h2>Create Staff Account</h2><p class="muted">Manager-only. No confirmation email is sent.</p><div class="grid"><div><label>Username</label><input id="newUsername" placeholder="e.g. sam"></div><div><label>Password</label><input id="newPassword" type="password" placeholder="Minimum 6 characters"></div><div><label>Role</label><select id="newRole"><option value="picker">Picker</option><option value="manager">Manager</option></select></div></div><button id="createStaffBtn" class="primary" style="margin-top:10px">CREATE STAFF ACCOUNT</button><p id="createStaffMsg" class="muted"></p></div><div class="card"><h2>Users & Roles</h2>`+data.map(u=>`<div class="row" style="border-top:1px solid #ddd;padding:10px 0"><div style="flex:1"><b>${esc(u.display_name||'User')}</b><br><span class="muted">${esc(u.user_id)}</span></div><select id="role_${u.user_id}" style="max-width:150px"><option value="picker" ${u.role==='picker'?'selected':''}>Picker</option><option value="manager" ${u.role==='manager'?'selected':''}>Manager</option></select><button onclick="saveRole('${u.user_id}')">SAVE ROLE</button></div>`).join('')+'</div>';$('createStaffBtn').onclick=createStaffUser}
+async function createStaffUser(){const username=$('newUsername').value.trim();const password=$('newPassword').value;const role=$('newRole').value;const msg=$('createStaffMsg');if(!/^[A-Za-z0-9._-]{3,30}$/.test(username)){msg.textContent='Username must be 3–30 characters using letters, numbers, dot, dash or underscore.';return}if(password.length<6){msg.textContent='Password must be at least 6 characters.';return}msg.textContent='Creating account…';const {data,error}=await sb.functions.invoke('create_staff_user',{body:{username,password,role}});if(error){msg.textContent=error.message||'Could not create staff account.';return}if(data?.error){msg.textContent=data.error;return}msg.textContent=`${username} created as ${role}.`;setTimeout(showUsers,600)}
+async function saveRole(id){const role=$('role_'+id).value;const {error}=await sb.rpc('set_user_role',{p_user_id:id,p_role:role});if(error)return alert(error.message);alert('Role updated.');showUsers()}
+
+$('itemScanCancel').onclick=stopItemBatchScanner;$('signin').onclick=signIn;$('claimManager').onclick=claimManager;$('stockBtn').onclick=()=>showStock();$('expiryBtn').onclick=showExpiry;$('historyBtn').onclick=showHistory;$('recipesBtn').onclick=showRecipes;$('pickListsBtn').onclick=showPickLists;$('receiveBtn').onclick=showReceive;$('qrLabelsBtn').onclick=showQrLabels;$('usersBtn').onclick=showUsers;$('searchBtn').onclick=showStock;$('search').addEventListener('keydown',e=>{if(e.key==='Enter')showStock()});$('logout').onclick=async()=>{if(realtime)await sb.removeChannel(realtime);if('serviceWorker' in navigator){const reg=await navigator.serviceWorker.getRegistration();const sub=await reg?.pushManager?.getSubscription();if(sub)await sub.unsubscribe();}await sb.auth.signOut();location.reload()};
+</script><script src="/qa.js"></script><script>boot();
+</script>
+</body></html>
+

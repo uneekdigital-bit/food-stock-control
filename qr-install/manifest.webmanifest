@@ -1,0 +1,19 @@
+{
+  "name": "Food Stock Control",
+  "short_name": "Food Stock",
+  "description": "Food inventory, batches, picking, QA and QR stock control",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#17365d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
